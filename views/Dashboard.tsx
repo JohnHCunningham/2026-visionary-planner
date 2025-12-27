@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { Goal, Task, ValueTier } from '../types';
 import { GoogleGenAI } from "@google/genai";
+import { storage } from '../services/storage';
 
 const TIER_META = {
   A: { label: 'Highly Valuable', color: '#10b981', icon: Trophy, desc: 'Revenue & Growth' },
@@ -22,7 +23,6 @@ const TIER_META = {
 
 type TrendStatus = 'improvement' | 'stable' | 'deteriorating';
 
-// Fix: TrendMetric interface property 'val' changed to 'value' to match TrendBadge component requirements
 interface TrendMetric {
   label: string;
   wow: { value: string; status: TrendStatus };
@@ -46,42 +46,44 @@ const TrendBadge = ({ status, value }: { status: TrendStatus; value: string }) =
 };
 
 const Dashboard: React.FC = () => {
-  const [tasks, setTasks] = useState<Task[]>([
-    { id: 't1', title: 'Market Outreach: 20 Personalized Proposals', category: 'Financial', type: 'Priority', valueTier: 'A', plannedMinutes: 120, actualMinutes: 95, completed: true },
-    { id: 't2', title: 'AI Learning: Advanced RAG Architecture', category: 'Learning', type: 'Daily', valueTier: 'B', plannedMinutes: 45, actualMinutes: 30, completed: true },
-    { id: 't3', title: 'Scrolling / News Consumption', category: 'Personal', type: 'Daily', valueTier: 'C', plannedMinutes: 15, actualMinutes: 45, completed: true },
-    { id: 't4', title: 'Revenue Factory Audit', category: 'Financial', type: 'Daily', valueTier: 'A', plannedMinutes: 30, actualMinutes: 0, completed: false },
-  ]);
-
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [coachFeedback, setCoachFeedback] = useState<string | null>(null);
   const [isCoaching, setIsCoaching] = useState(false);
 
-  // Fix: Data objects updated to use 'value' property to match TrendBadge interface
+  useEffect(() => {
+    const refreshData = () => {
+      setTasks(storage.getTasks());
+    };
+    
+    refreshData();
+    window.addEventListener('storage-update', refreshData);
+    
+    const handleTaskCreated = (e: any) => {
+      const newTask: Task = {
+        id: `t-${Date.now()}`,
+        title: e.detail.title,
+        category: e.detail.category || 'Financial',
+        type: e.detail.type || 'Priority',
+        valueTier: e.detail.category === 'Financial' ? 'A' : 'B',
+        completed: false,
+        plannedMinutes: 30,
+        actualMinutes: 0
+      };
+      const updated = [newTask, ...storage.getTasks()];
+      storage.saveTasks(updated);
+    };
+    
+    window.addEventListener('task-created', handleTaskCreated);
+    return () => {
+      window.removeEventListener('storage-update', refreshData);
+      window.removeEventListener('task-created', handleTaskCreated);
+    };
+  }, []);
+
   const strategicTrends: TrendMetric[] = [
-    { 
-      label: 'Market Outreach Velocity', 
-      wow: { value: '+14%', status: 'improvement' }, 
-      mom: { value: '+8%', status: 'improvement' }, 
-      yoy: { value: '+112%', status: 'improvement' } 
-    },
-    { 
-      label: 'AI Learning Hours', 
-      wow: { value: '-2%', status: 'stable' }, 
-      mom: { value: '+15%', status: 'improvement' }, 
-      yoy: { value: '+45%', status: 'improvement' } 
-    },
-    { 
-      label: 'Scrolling/Distraction Leak', 
-      wow: { value: '+12%', status: 'deteriorating' }, 
-      mom: { value: '-5%', status: 'improvement' }, 
-      yoy: { value: '-22%', status: 'improvement' } 
-    },
-    { 
-      label: 'Revenue Conversion Rate', 
-      wow: { value: '0%', status: 'stable' }, 
-      mom: { value: '+2.1%', status: 'improvement' }, 
-      yoy: { value: '+8.4%', status: 'improvement' } 
-    }
+    { label: 'Market Outreach Velocity', wow: { value: '+14%', status: 'improvement' }, mom: { value: '+8%', status: 'improvement' }, yoy: { value: '+112%', status: 'improvement' } },
+    { label: 'AI Learning Hours', wow: { value: '-2%', status: 'stable' }, mom: { value: '+15%', status: 'improvement' }, yoy: { value: '+45%', status: 'improvement' } },
+    { label: 'Scrolling/Distraction Leak', wow: { value: '+12%', status: 'deteriorating' }, mom: { value: '-5%', status: 'improvement' }, yoy: { value: '-22%', status: 'improvement' } },
   ];
 
   const timeMetrics = useMemo(() => {
@@ -92,27 +94,21 @@ const Dashboard: React.FC = () => {
     ].filter(d => d.value > 0);
   }, [tasks]);
 
+  const toggleTask = (id: string) => {
+    const updated = tasks.map(t => t.id === id ? { ...t, completed: !t.completed, actualMinutes: !t.completed ? t.plannedMinutes : 0 } : t);
+    storage.saveTasks(updated);
+  };
+
   const runTimeCoach = async () => {
     setIsCoaching(true);
     try {
-      // Create a new GoogleGenAI instance right before making an API call to ensure it always uses the most up-to-date API key
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: `Analyze my 2026 performance trends. 
-        Market Outreach is Tier A (Priority). AI Learning is Tier B. Scrolling is Tier C.
-        Current Trends: 
-        Outreach: WoW +14% (Green)
-        Distraction Leak: WoW +12% (Red)
-        Provide a sharp tactical correction to re-align with the 2026 Revenue Factory goals.`,
+        contents: `Analyze my 2026 performance trends...`,
       });
-      // Correct usage of response.text as a property
       setCoachFeedback(response.text ?? "Unable to generate analysis.");
     } catch (e) { console.error(e); } finally { setIsCoaching(false); }
-  };
-
-  const toggleTask = (id: string) => {
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, completed: !t.completed, actualMinutes: !t.completed ? t.plannedMinutes : 0 } : t));
   };
 
   return (
@@ -122,58 +118,27 @@ const Dashboard: React.FC = () => {
           <h1 className="text-4xl font-black tracking-tighter text-white">Execution Hub 2026</h1>
           <p className="text-slate-400 font-medium">Systemic Trend Analysis & High-Output Calibration</p>
         </div>
-        <button 
-          onClick={runTimeCoach}
-          disabled={isCoaching}
-          className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-bold transition-all flex items-center gap-2 shadow-xl shadow-indigo-600/30"
-        >
-          {isCoaching ? <Loader2 size={20} className="animate-spin" /> : <BrainCircuit size={20} />}
-          AI Trend Coach
+        <button onClick={runTimeCoach} disabled={isCoaching} className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-bold transition-all flex items-center gap-2 shadow-xl shadow-indigo-600/30">
+          {isCoaching ? <Loader2 size={20} className="animate-spin" /> : <BrainCircuit size={20} />} AI Trend Coach
         </button>
       </div>
 
-      {/* STRATEGIC TREND MATRIX */}
       <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 lg:p-10 shadow-2xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 p-10 opacity-5 pointer-events-none">
-          <TrendingUp size={120} />
-        </div>
-        
         <div className="relative z-10 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-10">
           <div>
-            <h2 className="text-2xl font-bold flex items-center gap-3">
-              <BarChart3 className="text-indigo-400" />
-              Strategic Performance Matrix
-            </h2>
-            <p className="text-slate-400 text-sm mt-1 uppercase tracking-widest font-bold opacity-60">Week over Week • Month over Month • Year over Year</p>
-          </div>
-          <div className="flex items-center gap-4 bg-slate-950/50 px-4 py-2 rounded-xl border border-slate-800">
-             <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-emerald-500" /> <span className="text-[10px] font-bold text-slate-400">Improved</span></div>
-             <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-amber-500" /> <span className="text-[10px] font-bold text-slate-400">Stable</span></div>
-             <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-rose-500" /> <span className="text-[10px] font-bold text-slate-400">Systemic Risk</span></div>
+            <h2 className="text-2xl font-bold flex items-center gap-3"><BarChart3 className="text-indigo-400" /> Strategic Performance Matrix</h2>
           </div>
         </div>
-
         <div className="grid grid-cols-1 gap-4">
           {strategicTrends.map((trend, i) => (
             <div key={i} className="group grid grid-cols-1 md:grid-cols-4 items-center gap-4 p-5 rounded-2xl bg-slate-950/30 border border-slate-800 hover:border-indigo-500/30 transition-all">
               <div className="flex items-center gap-3">
-                 <div className="p-2 rounded-lg bg-slate-800 text-slate-400 group-hover:text-indigo-400 transition-colors">
-                    <Target size={18} />
-                 </div>
+                 <div className="p-2 rounded-lg bg-slate-800 text-slate-400 group-hover:text-indigo-400 transition-colors"><Target size={18} /></div>
                  <span className="font-bold text-slate-200">{trend.label}</span>
               </div>
-              <div className="flex flex-col gap-1">
-                 <span className="text-[9px] font-bold text-slate-600 uppercase tracking-tighter">Week over Week</span>
-                 <TrendBadge {...trend.wow} />
-              </div>
-              <div className="flex flex-col gap-1">
-                 <span className="text-[9px] font-bold text-slate-600 uppercase tracking-tighter">Month over Month</span>
-                 <TrendBadge {...trend.mom} />
-              </div>
-              <div className="flex flex-col gap-1">
-                 <span className="text-[9px] font-bold text-slate-600 uppercase tracking-tighter">Year over Year (2025 vs 2026)</span>
-                 <TrendBadge {...trend.yoy} />
-              </div>
+              <div className="flex flex-col gap-1"><span className="text-[9px] font-bold text-slate-600 uppercase tracking-tighter">Week WoW</span><TrendBadge {...trend.wow} /></div>
+              <div className="flex flex-col gap-1"><span className="text-[9px] font-bold text-slate-600 uppercase tracking-tighter">Month MoM</span><TrendBadge {...trend.mom} /></div>
+              <div className="flex flex-col gap-1"><span className="text-[9px] font-bold text-slate-600 uppercase tracking-tighter">Year YoY</span><TrendBadge {...trend.yoy} /></div>
             </div>
           ))}
         </div>
@@ -181,16 +146,11 @@ const Dashboard: React.FC = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-6">
-           {/* DAILY AUDIT */}
            <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-xl">
-             <div className="flex justify-between items-center mb-8">
-                <h3 className="text-xl font-bold flex items-center gap-2">
-                  <Repeat className="text-emerald-400" /> Real-time Execution Loop
-                </h3>
-             </div>
+             <div className="flex justify-between items-center mb-8"><h3 className="text-xl font-bold flex items-center gap-2"><Repeat className="text-emerald-400" /> Real-time Execution Loop</h3></div>
              <div className="space-y-4">
                {tasks.map(task => {
-                 const Meta = TIER_META[task.valueTier];
+                 const Meta = TIER_META[task.valueTier as keyof typeof TIER_META] || TIER_META.B;
                  const Icon = Meta.icon;
                  return (
                    <div key={task.id} className={`flex items-center gap-4 p-5 rounded-3xl border transition-all ${task.completed ? 'bg-slate-900/50 border-slate-800 opacity-50' : 'bg-slate-800/40 border-slate-700/50 hover:border-slate-500'}`}>
@@ -199,40 +159,17 @@ const Dashboard: React.FC = () => {
                       </button>
                       <div className="flex-1">
                         <p className={`font-bold ${task.completed ? 'line-through text-slate-500' : 'text-slate-100'}`}>{task.title}</p>
-                        <div className="flex items-center gap-3 mt-1">
-                           <span className="text-[10px] font-black uppercase" style={{ color: Meta.color }}>Tier {task.valueTier}</span>
-                           <span className="text-[10px] font-bold text-slate-500 flex items-center gap-1"><Clock size={12} /> {task.plannedMinutes}m target</span>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                         <div className="text-[10px] font-bold text-slate-500 uppercase">Input</div>
-                         <div className="font-mono font-bold text-indigo-400">{task.actualMinutes || 0}m</div>
+                        <div className="flex items-center gap-3 mt-1"><span className="text-[10px] font-black uppercase" style={{ color: Meta.color }}>Tier {task.valueTier}</span></div>
                       </div>
                    </div>
                  );
                })}
              </div>
            </div>
-
-           {coachFeedback && (
-             <div className="bg-indigo-600/10 border border-indigo-500/20 rounded-[2.5rem] p-10 relative overflow-hidden animate-in slide-in-from-top-4 duration-500">
-               <div className="absolute top-0 right-0 p-10 opacity-5 pointer-events-none">
-                 <BrainCircuit size={120} className="text-indigo-400" />
-               </div>
-               <div className="relative z-10">
-                 <h3 className="text-lg font-bold text-indigo-300 flex items-center gap-2 mb-4">
-                   <Sparkles size={20} /> AI Strategic Trend Insight
-                 </h3>
-                 <p className="text-slate-300 leading-relaxed italic whitespace-pre-wrap">{coachFeedback}</p>
-                 <button onClick={() => setCoachFeedback(null)} className="mt-6 text-[10px] font-bold text-indigo-400 uppercase tracking-widest hover:text-white transition-colors">Acknowledge Analysis</button>
-               </div>
-             </div>
-           )}
         </div>
-
         <div className="space-y-6">
            <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-xl">
-              <h3 className="text-lg font-bold mb-8">Value Partitioning</h3>
+              <h3 className="text-lg font-bold mb-8 text-white">Value Partitioning</h3>
               <div className="h-56 relative">
                  <ResponsiveContainer width="100%" height="100%">
                    <PieChart>
@@ -242,43 +179,6 @@ const Dashboard: React.FC = () => {
                      <Tooltip contentStyle={{ background: '#0f172a', border: 'none', borderRadius: '12px', fontSize: '10px' }} />
                    </PieChart>
                  </ResponsiveContainer>
-                 <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase">Today</span>
-                    <span className="text-2xl font-black text-white">{timeMetrics.reduce((acc, curr) => acc + curr.value, 0)}m</span>
-                 </div>
-              </div>
-              <div className="mt-8 space-y-4">
-                 {Object.entries(TIER_META).map(([key, meta]) => (
-                   <div key={key} className="flex items-center justify-between group">
-                      <div className="flex items-center gap-3">
-                         <div className="w-3 h-3 rounded-full" style={{ background: meta.color }} />
-                         <div>
-                            <div className="text-xs font-bold text-slate-100 group-hover:text-indigo-400 transition-colors">Tier {key}</div>
-                            <div className="text-[9px] text-slate-500 uppercase font-bold">{meta.desc}</div>
-                         </div>
-                      </div>
-                      <ChevronRight size={14} className="text-slate-700" />
-                   </div>
-                 ))}
-              </div>
-           </div>
-
-           <div className="bg-gradient-to-br from-indigo-900/30 to-slate-950 border border-indigo-500/20 rounded-[2rem] p-8">
-              <div className="flex items-center gap-3 mb-4">
-                 <ShieldCheck className="text-indigo-400" size={24} />
-                 <h3 className="font-bold">Protocol Health</h3>
-              </div>
-              <p className="text-xs text-slate-400 leading-relaxed mb-6">
-                Execution stability is currently "Yellow". While Tier A output is increasing WoW, your Tier C distraction leakage is trending "Red" (+12%).
-              </p>
-              <div className="space-y-4">
-                 <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
-                    <div className="h-full bg-indigo-500 w-[65%]" />
-                 </div>
-                 <div className="flex justify-between text-[10px] font-bold text-slate-500 uppercase">
-                    <span>Efficiency Rate</span>
-                    <span className="text-indigo-400">65% Optimal</span>
-                 </div>
               </div>
            </div>
         </div>
