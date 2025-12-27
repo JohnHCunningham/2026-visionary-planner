@@ -1,0 +1,8 @@
+{
+  "name": "2026 Visionary Planner: Revenue Factory & Peak Health",
+  "description": "A high-performance strategy dashboard for 2026, integrating the 'Revenue Factory' AI business model with a peak-performance health routine.",
+  "requestFramePermissions": [
+    "geolocation",
+    "microphone"
+  ]
+}
